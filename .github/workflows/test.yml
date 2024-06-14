@@ -1,0 +1,73 @@
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version:
+        - '3.11'
+        - '3.12'
+    name: Python ${{ matrix.python-version }}
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+        - 6379:6379
+      postgres:
+        image: postgres:16
+        ports:
+        - 5432:5432
+        # needed because the postgres container does not provide a healthcheck
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Configure git
+      run: |
+        git config --global user.email "ci@example.com"
+        git config --global user.name "CI Job"
+    - name: Install apt dependencies
+      run: |
+        sudo apt update
+        sudo apt install texlive-latex-recommended libcairo-dev gir1.2-pango-1.0 libgirepository1.0-dev libacl1-dev gettext texlive-lang-japanese texlive-xetex texlive-fonts-recommended
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
+        cache-dependency-path: pyproject.toml
+    - name: Install pip dependencies
+      run: |
+        pip install --upgrade pip wheel Cython setuptools
+        pip install --no-binary :all: cffi
+        pip install https://github.com/WeblateOrg/weblate/archive/main.zip
+        pip install -e .[test]
+    - name: Test with Django
+      env:
+        CI_DATABASE: postgresql
+        CI_DB_PASSWORD: postgres
+        CI_DB_HOST: localhost
+        DJANGO_SETTINGS_MODULE: wlhosted.settings_test
+      run: |
+        weblate collectstatic --noinput
+        coverage run `which weblate` test
+    - uses: codecov/codecov-action@v4
+      with:
+        token: ${{secrets.CODECOV_TOKEN}}
+        flags: unittests
+        name: Python ${{ matrix.python-version }}
+    - name: DeepSource
+      continue-on-error: true
+      env:
+        DEEPSOURCE_DSN: ${{secrets.DEEPSOURCE_DSN}}
+      run: |
+        curl https://deepsource.io/cli | sh
+        ./bin/deepsource report --analyzer test-coverage --key python --value-file ./coverage.xml

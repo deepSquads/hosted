@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""
+Simple script to accept all invitations on GitHub.
+
+It takes GitHub access token as single parameter.
+"""
+
+import sys
+
+import requests
+
+
+def check_response(response):
+    if response.status_code != 200:
+        print(response.text)
+    response.raise_for_status()
+
+
+def main():
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {sys.argv[1]}",
+    }
+
+    url = "https://api.github.com/user/memberships/orgs"
+    accept_url = "https://api.github.com/user/memberships/orgs/{}"
+
+    orgs = requests.get(url, headers=headers)
+    check_response(orgs)
+
+    while 1:
+        orgs = requests.get(url, headers=headers)
+        check_response(orgs)
+
+        for org in orgs.json():
+            if org["state"] == "pending":
+                name = org["organization"]["login"]
+                print(f"Accepting org {name}")
+                response = requests.patch(
+                    accept_url.format(name), '{"state":"active"}', headers=headers
+                )
+                check_response(response)
+
+        if "next" not in orgs.links:
+            break
+        url = orgs.links["next"]["url"]
+
+    url = "https://api.github.com/user/repository_invitations"
+
+    invitations = requests.get(url, headers=headers)
+    check_response(invitations)
+    for invitation in invitations.json():
+        print(
+            "Accepting {}: {}".format(
+                invitation["repository"]["html_url"],
+                invitation["html_url"],
+            )
+        )
+        response = requests.patch(invitation["url"], headers=headers)
+        check_response(response)
+
+
+if __name__ == "__main__":
+    main()
